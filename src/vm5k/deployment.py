@@ -33,8 +33,7 @@ from vm5k.config import default_vm
 from vm5k.actions import create_disks, install_vms, start_vms, \
     wait_vms_have_started, destroy_vms, create_disks_all_hosts, distribute_vms,\
     activate_vms
-from vm5k.utils import prettify, print_step, get_fastest_host, \
-    get_CPU_RAM_FLOPS
+from vm5k.utils import prettify, print_step, get_fastest_host, get_CPU_RAM_FLOPS
 from vm5k.services import dnsmasq_server, setup_aptcacher_server, configure_apt_proxy
 
 default_connection_params['user'] = 'root'
@@ -103,7 +102,8 @@ class vm5k_deployment():
         self.state = Element('vm5k')
         self._define_elements(infile, resources, hosts, vms, ip_mac,
                               distribution)
-
+        self.debian_name = self.env_name.split('-')[0]
+        #logger.info('XXXX %s || %s || %s' % (self.env_file, self.env_name, self.env_user))
         logger.info('%s %s %s %s %s %s %s %s',
                     len(self.sites), style.emph('sites'),
                     len(self.clusters), style.user1('clusters'),
@@ -181,6 +181,7 @@ class vm5k_deployment():
         """Enable a bridge if needed on the remote hosts, configure libvirt
         with a bridged network for the virtual machines, and restart service.
         """
+        print 'Start configuring libvirt'
         self._enable_bridge()
         self._libvirt_check_service()
         self._libvirt_uniquify()
@@ -288,7 +289,7 @@ class vm5k_deployment():
                                         connection_params={'taktuk_options': taktuk_conf}).run()
         self._actions_hosts(conf_ssh)
 
-    def _start_disk_copy(self, disks=None):
+    def _start_disk_copy(self, disks=None, backing_file_dir='/tmp'):
         """ """
         disks_copy = []
         if not disks:
@@ -296,7 +297,7 @@ class vm5k_deployment():
         for bf in disks:
             logger.info('Treating ' + style.emph(bf))
             logger.debug("Checking frontend disk vs host disk")
-            raw_disk = '/tmp/orig_' + bf.split('/')[-1]
+            raw_disk = '%s/orig_' % backing_file_dir + bf.split('/')[-1]
             f_disk = Process('md5sum -b ' + bf).run()
             disk_hash = f_disk.stdout.split(' ')[0]
             cmd = 'if [ -f ' + raw_disk + ' ]; ' + \
@@ -313,13 +314,13 @@ class vm5k_deployment():
                             " is already present, skipping copy")
             else:
                 disks_copy.append(self.fact.get_fileput(self.hosts, [bf],
-                                                        remote_location="/tmp"))
+                                                        remote_location="%s" % backing_file_dir))
         if len(disks_copy) > 0:
             self.copy_actions = ParallelActions(disks_copy).start()
         else:
             self.copy_actions = Remote('ls', self.hosts[0]).run()
 
-    def _create_backing_file(self, disks=None):
+    def _create_backing_file(self, disks=None, backing_file_dir='/tmp'):
         """ """
         if not self.copy_actions:
             self._start_disk_copy(disks)
@@ -330,8 +331,8 @@ class vm5k_deployment():
             mv_actions = []
             for act in self.copy_actions.actions:
                 fname = act.local_files[0].split('/')[-1]
-                mv_actions.append(self.fact.get_remote("mv /tmp/" + fname +
-                                                       " /tmp/orig_" + fname,
+                mv_actions.append(self.fact.get_remote("mv %s/" % backing_file_dir + fname +
+                                                       " %s/orig_" % backing_file_dir + fname,
                                                        self.hosts))
 
             mv = ParallelActions(mv_actions).run()
@@ -339,8 +340,8 @@ class vm5k_deployment():
         if not disks:
             disks = self.backing_files
         for bf in disks:
-            raw_disk = '/tmp/orig_' + bf.split('/')[-1]
-            to_disk = '/tmp/' + bf.split('/')[-1]
+            raw_disk = '%s/orig_' % backing_file_dir + bf.split('/')[-1]
+            to_disk = '%s/' % backing_file_dir + bf.split('/')[-1]
             self.fact.get_remote('cp ' + raw_disk + ' ' + to_disk, self.hosts).run()
             logger.info('Copying ssh key on ' + to_disk + ' ...')
             cmd = 'modprobe nbd max_part=16; ' + \
@@ -415,32 +416,34 @@ class vm5k_deployment():
     # Hosts configuration
     def _enable_bridge(self, name='br0'):
         """We need a bridge to have automatic DHCP configuration for the VM."""
-        logger.detail('Configuring the bridge')
+        print('Configuring the bridge')
         hosts_br = self._get_bridge(self.hosts)
         nobr_hosts = []
         for host, br in hosts_br.iteritems():
             if br is None:
-                logger.debug('No bridge on host %s', style.host(host))
+                print('No bridge on host %s' % style.host(host))
                 nobr_hosts.append(host)
             elif br != name:
-                logger.debug('Wrong bridge on host %s, destroying it',
+                print('Wrong bridge on host %s, destroying it' %
                              style.host(host))
                 SshProcess('ip link set ' + br + ' down ; brctl delbr ' + br,
                             host).run()
                 nobr_hosts.append(host)
             else:
-                logger.debug('Bridge %s is present on host %s',
+                print('Bridge %s is present on host %s' %
                              style.emph('name'), style.host(host))
 
         nobr_hosts = map(lambda x: x.address if isinstance(x, Host) else x, 
                          nobr_hosts)
 
         if len(nobr_hosts) > 0:
-            logger.debug('Creating bridge on %s', hosts_list(nobr_hosts))
+            print('Creating bridge on %s' % hosts_list(nobr_hosts))
+            # 'ifdown $br_if ; \n' + \
+            # 'sed -i "s/$br_if inet dhcp/$br_if inet manual/g" /etc/network/interfaces ; \n' + \
+            # 'sed -i "s/auto $br_if//g" /etc/network/interfaces ; \n' + \
             script = 'export br_if=`ip route |grep default |cut -f 5 -d " "`; \n' + \
-    'ifdown $br_if ; \n' + \
-    'sed -i "s/$br_if inet dhcp/$br_if inet manual/g" /etc/network/interfaces ; \n' + \
-    'sed -i "s/auto $br_if//g" /etc/network/interfaces ; \n' + \
+    'export ip_df=`ip route |grep default |cut -f 3 -d " "`; \n' + \
+    'export ip_net=`ip route | grep link | grep -v '+ name + '| cut -f 1 -d " "`; \n' +\
     'echo " " >> /etc/network/interfaces ; \n' + \
     'echo "auto ' + name + '" >> /etc/network/interfaces ; \n' + \
     'echo "iface ' + name + ' inet dhcp" >> /etc/network/interfaces ; \n' + \
@@ -448,7 +451,13 @@ class vm5k_deployment():
     'echo "  bridge_stp off" >> /etc/network/interfaces ; \n' + \
     'echo "  bridge_maxwait 0" >> /etc/network/interfaces ; \n' + \
     'echo "  bridge_fd 0" >> /etc/network/interfaces ; \n' + \
-    'ifup ' + name
+    'ifup ' + name + ' ; \n' + \
+    'ip route delete default ; \n' + \
+    'ip route delete $ip_net dev $br_if ; \n' + \
+    'ip route add default via $ip_df dev br0 ; \n' + \
+    'sed -i "s/$br_if inet dhcp/$br_if inet manual/g" /etc/network/interfaces ; \n' + \
+    'sed -i "s/auto $br_if//g" /etc/network/interfaces ; \n' + \
+    'ifconfig $br_if 0.0.0.0'
             fd, br_script = mkstemp(dir='/tmp/', prefix='create_br_')
             f = fdopen(fd, 'w')
             f.write(script)
@@ -458,7 +467,7 @@ class vm5k_deployment():
             self.fact.get_remote('nohup sh ' + br_script.split('/')[-1],
                                  nobr_hosts).run()
 
-            logger.debug('Waiting for network restart')
+            print('Waiting for network restart')
             if_up = False
             nmap_tries = 0
             while (not if_up) and nmap_tries < 20:
@@ -471,12 +480,12 @@ class vm5k_deployment():
                     if 'Nmap done' in line:
                         if_up = line.split()[2] == line.split()[5].replace('(',
                                                                            '')
-            logger.debug('Network has been restarted')
-        logger.detail('All hosts have the bridge %s', style.emph(name))
+            print('Network has been restarted')
+        print('All hosts have the bridge %s' % style.emph(name))
 
     def _get_bridge(self, hosts):
         """ """
-        logger.debug('Retrieving bridge on hosts %s',
+        print('Retrieving bridge on hosts %s' %
                      ", ".join([host for host in hosts]))
         cmd = "brctl show |grep -v 'bridge name' | awk '{ print $1 }' |head -1"
         bridge_exists = self.fact.get_remote(cmd, hosts)
@@ -497,15 +506,15 @@ class vm5k_deployment():
         # Create sources.list file
         fd, tmpsource = mkstemp(dir='/tmp/', prefix='sources.list_')
         f = fdopen(fd, 'w')
-        f.write('deb http://ftp.debian.org/debian wheezy main contrib non-free\n' + \
-                'deb http://ftp.debian.org/debian wheezy-backports main contrib non-free\n' + \
-                'deb http://security.debian.org/ wheezy/updates main contrib non-free\n')
+        f.write('deb http://ftp.debian.org/debian %s main contrib non-free\n' % self.debian_name + \
+                'deb http://ftp.debian.org/debian %s-backports main contrib non-free\n' % self.debian_name+ \
+                'deb http://security.debian.org/ %s/updates main contrib non-free\n' % self.debian_name)
         f.close()
         # Create preferences file
         fd, tmppref = mkstemp(dir='/tmp/', prefix='preferences_')
         f = fdopen(fd, 'w')
-        f.write('Package: * \nPin: release a=wheezy \nPin-Priority: 900\n\n' + \
-                'Package: * \nPin: release a=wheezy-backports \nPin-Priority: 875\n\n')
+        f.write('Package: * \nPin: release a=%s \nPin-Priority: 900\n\n' % self.debian_name + \
+                'Package: * \nPin: release a=%s-backports \nPin-Priority: 875\n\n' % self.debian_name)
         f.close()
         # Create apt.conf file
         fd, tmpaptconf = mkstemp(dir='/tmp/', prefix='apt.conf_')
@@ -548,7 +557,7 @@ class vm5k_deployment():
         logger.info('Installing libvirt packages \n%s',
                     style.emph(libvirt_packages))
         cmd = 'export DEBIAN_MASTER=noninteractive ; apt-get update && apt-get install -y --force-yes '+\
-            '-o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -t wheezy-backports '+\
+            '-o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -t %s-backports ' % self.debian_name+\
             libvirt_packages
         install_libvirt = self.fact.get_remote(cmd, self.hosts).run()
         self._actions_hosts(install_libvirt)
@@ -761,6 +770,7 @@ class vm5k_deployment():
         else:
             el_cluster = SubElement(el_site, 'cluster', attrib={'id': 'unknown'})
         logger.debug('Clusters added \n %s', prettify(_state))
+        print 'xxxxxxx', self.hosts
         hosts_attr = get_CPU_RAM_FLOPS(self.hosts)
         for host in self.hosts:
             if host in get_g5k_hosts(): 

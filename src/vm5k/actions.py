@@ -112,7 +112,30 @@ def define_vms(vms_id, template=None, ip_mac=None, tap=None, state=None,
     ip_mac = [(None, None)] * n_vm if ip_mac is None else ip_mac
 
     tap = [tap] * n_vm if not isinstance(tap, list) else tap
-
+    logger.info('n_VM: %s, len of ip_mac:%s' % (n_vm, len(ip_mac)))
+    logger.info('''
+    vms_id: %s,
+    mem: %s,
+    n_cpu: %s,
+    cpusets: %s,
+    hdd: %s,
+    host: %s,
+    backing_file: %s,
+    real_file: %s,
+    state: %s,
+    tap: %s,
+    ip_mac: %s,
+    ''' % (len(vms_id),
+    len(mem),
+    len(n_cpu),
+    len(cpusets),
+    len(hdd),
+    len(host),
+    len(backing_file),
+    len(real_file),
+    len(state),
+    len(tap),
+    len(ip_mac)))
     vms = [{'id': vms_id[i], 'mem': mem[i], 'n_cpu': n_cpu[i],
             'cpuset': cpusets[i], 'hdd': hdd[i], 'host': host[i],
             'backing_file': backing_file[i], 'real_file': real_file[i],
@@ -206,7 +229,7 @@ def list_vm(hosts, not_running=False):
     for p in list_vm.processes:
         lines = p.stdout.split('\n')
         for line in lines:
-            if 'running' in line or 'shut off' in line:
+            if 'running' in line or 'shut off'in line or 'paused' in line:
                 std = line.split()
                 hosts_vms[p.host.address].append({'id': std[1]})
     logger.debug(pformat(hosts_vms))
@@ -215,47 +238,61 @@ def list_vm(hosts, not_running=False):
 
 def destroy_vms(hosts, undefine=False):
     """Destroy all the VM on the hosts"""
-    cmds = []
-    hosts_with_vms = []
-    hosts_vms = list_vm(hosts, not_running=True)
+    logger.info('Destroying vms from %s' % hosts)
+    # retry destroying
+    all_destroyed = False
+    attempt = 0
+    while not all_destroyed:
+        attempt += 1
+        logger.info('Destroying vms: attempt #%s' % attempt)
+        cmds = []
+        hosts_with_vms = []
+        hosts_vms = list_vm(hosts, not_running=True)
 
-    for host, vms in hosts_vms.iteritems():
-        if len(vms) > 0:
-            if not undefine:
-                cmds.append('; '.join('virsh destroy ' + vm['id']
-                                      for vm in vms))
-            else:
-                cmds.append('; '.join('virsh destroy ' + vm['id'] + '; '
-                                      'virsh undefine ' + vm['id']
-                                      for vm in vms))
-            hosts_with_vms.append(host)
-    if len(cmds) > 0:
-        TaktukRemote('{{cmds}}', hosts_with_vms).run()
+        for host, vms in hosts_vms.iteritems():
+            logger.info('Destroying %s vms from host %s' % (len(vms), host))
+            if len(vms) > 0:
+                if not undefine:
+                    cmds.append('; '.join('virsh destroy ' + vm['id']
+                                          for vm in vms))
+                else:
+                    cmds.append('; '.join('virsh destroy ' + vm['id'] + '; '
+                                          'virsh undefine ' + vm['id']
+                                          for vm in vms))
+                hosts_with_vms.append(host)
+        if len(cmds) > 0:
+            TaktukRemote('{{cmds}}', hosts_with_vms).run()
+        if len(hosts_with_vms) == 0:
+            all_destroyed = True
+            logger.info('Destroying finished')
+        if attempt == 30:
+            logger.info('Destroying so many times, unsuccessfully')
+            break
 
 
-def cmd_disk_real(vm):
+def cmd_disk_real(vm, data_file_dir, backing_file_dir):
     """Return a command to create a new disk from the backing_file"""
-    return 'qemu-img convert /tmp/' + vm['backing_file'].split('/')[-1] + \
-        ' -O qcow2 /tmp/' + vm['id'] + '.qcow2 ;'
+    return 'qemu-img convert %s' % backing_file_dir + vm['backing_file'].split('/')[-1] + \
+        ' -O qcow2 %s' % data_file_dir + vm['id'] + '.qcow2 ;'
 
 
-def cmd_disk_qcow2(vm):
+def cmd_disk_qcow2(vm, data_file_dir, backing_file_dir):
     """Return a command to create a qcow2 file using the backing_file"""
-    return 'qemu-img create -f qcow2 -o backing_file=/tmp/' + \
-        vm['backing_file'].split('/')[-1] + ',backing_fmt=qcow2 /tmp/' + \
+    return 'qemu-img create -f qcow2 -o backing_file=%s' % backing_file_dir + \
+        vm['backing_file'].split('/')[-1] + ',backing_fmt=qcow2 %s' % data_file_dir + \
         vm['id'] + '.qcow2 ' + str(vm['hdd']) + 'G ; '
 
 
-def create_disks(vms):
+def create_disks(vms, data_file_dir='/tmp/', backing_file_dir='/tmp/'):
     """ Return an action to create the disks for the VMs on the hosts"""
     logger.detail(', '.join([vm['id'] for vm in sorted(vms)]))
     hosts_cmds = {}
 
     for vm in vms:
         if vm['real_file']:
-            cmd = cmd_disk_real(vm)
+            cmd = cmd_disk_real(vm, data_file_dir, backing_file_dir)
         else:
-            cmd = cmd_disk_qcow2(vm)
+            cmd = cmd_disk_qcow2(vm, data_file_dir, backing_file_dir)
         logger.detail(vm['id'] + ': ' + cmd)
         hosts_cmds[vm['host']] = cmd if not vm['host'] in hosts_cmds \
             else hosts_cmds[vm['host']] + cmd
@@ -285,7 +322,7 @@ def create_disks_all_hosts(vms, hosts):
                               Local('rm ' + vms_disks)])
 
 
-def install_vms(vms):
+def install_vms(vms, data_file_dir='/tmp/'):
     """ Return an action to install the VM on the hosts"""
     logger.detail(', '.join([vm['id'] for vm in sorted(vms)]))
     hosts_cmds = {}
@@ -293,7 +330,7 @@ def install_vms(vms):
         cmd = 'virt-install -d --import --connect qemu:///system ' + \
             '--nographics --noautoconsole --noreboot --name=' + vm['id'] + ' '\
             '--network network=default,mac=' + vm['mac'] + ' --ram=' + \
-            str(vm['mem']) + ' --disk path=/tmp/' + vm['id'] + \
+            str(vm['mem']) + ' --disk path=%s' % data_file_dir + vm['id'] + \
             '.qcow2,device=disk,bus=virtio,format=qcow2,size=' + \
             str(vm['hdd']) + ',cache=none ' + \
             '--vcpus=' + str(vm['n_cpu']) + ' --cpuset=' + vm['cpuset']

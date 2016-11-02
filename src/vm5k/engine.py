@@ -65,6 +65,7 @@ class vm5k_engine(Engine):
                     help="name of the environment to be deployed",
                     type="string",
                     default="wheezy-x64-base")
+                    #default="jessie-x64-base")
         self.options_parser.add_option("-f", dest="env_file",
                     help="path to the environment file",
                     type="string",
@@ -218,7 +219,8 @@ class vm5k_engine_para(vm5k_engine):
             if i_slot == len(slots) - 1:
                 return False, False
         logger.debug('Reserving %s nodes at %s', n_nodes, format_date(startdate))
-        return startdate, n_nodes
+        return startdate, 1
+        #return startdate, n_nodes
 
     def run(self):
         """The main experimental workflow, as described in
@@ -260,8 +262,10 @@ class vm5k_engine_para(vm5k_engine):
                 threads = {}
 
                 # Checking that the job is running and not in Error
-                while get_oar_job_info(self.oar_job_id, self.frontend)['state'] != 'Error' \
+                while self.is_job_alive()['state'] != 'Error' \
                     or len(threads.keys()) > 0:
+                # while get_oar_job_info(self.oar_job_id, self.frontend)['state'] != 'Error' \
+                #     or len(threads.keys()) > 0:
                     job_is_dead = False
                     while self.options.n_nodes > len(available_hosts):
                         tmp_threads = dict(threads)
@@ -271,7 +275,7 @@ class vm5k_engine_para(vm5k_engine):
                                 available_ip_mac.extend(tmp_threads[t]['ip_mac'])
                                 del threads[t]
                         sleep(5)
-                        if get_oar_job_info(self.oar_job_id, self.frontend)['state'] == 'Error':
+                        if self.is_job_alive()['state'] == 'Error':
                             job_is_dead = True
                             break
                     if job_is_dead:
@@ -303,7 +307,8 @@ class vm5k_engine_para(vm5k_engine):
                     t.daemon = True
                     t.start()
 
-                if get_oar_job_info(self.oar_job_id, self.frontend)['state'] == 'Error':
+                # if get_oar_job_info(self.oar_job_id, self.frontend)['state'] == 'Error':
+                if self.is_job_alive()['state'] == 'Error':
                     job_is_dead = True
 
                 if job_is_dead:
@@ -316,6 +321,14 @@ class vm5k_engine_para(vm5k_engine):
                     oardel([(self.oar_job_id, self.frontend)])
                 else:
                     logger.info('Keeping job alive for debugging')
+    
+    def is_job_alive(self):
+        rez=get_oar_job_info(self.oar_job_id, self.frontend)
+        while 'state' not in rez:
+            logger.info('Retrying getting oar_job_info')
+            rez=get_oar_job_info(self.oar_job_id, self.frontend)
+        return rez
+
 
 
 def get_cpu_topology(cluster, xpdir=None):
