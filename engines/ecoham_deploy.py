@@ -44,8 +44,9 @@ class EcohamDeploy(vm5k_engine):
     def _compile_ecoham(self, setup):
         logger.info('Compiling ECOHAM')
         cmd = '''
+            rsync -avzP /mnt/ECOHAM5_git ~/ &&
             cd ECOHAM5_git &&
-            ./CompileJob-cluster.sh TEST 0
+            ./CompileJob-cluster.sh TEST 0 &&
             ./CompileJob-cluster.sh TEST 2
         '''
         compile_ecoham = setup.fact.get_remote(cmd, setup.hosts).run()
