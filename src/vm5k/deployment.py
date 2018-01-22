@@ -443,7 +443,7 @@ class vm5k_deployment():
             # 'sed -i "s/auto $br_if//g" /etc/network/interfaces ; \n' + \
             script = 'export br_if=`ip route |grep default |cut -f 5 -d " "`; \n' + \
     'export ip_df=`ip route |grep default |cut -f 3 -d " "`; \n' + \
-    'export ip_net=`ip route | grep link | grep -v '+ name + '| cut -f 1 -d " "`; \n' +\
+    'export ip_net=`ip route | grep link | grep $br_if | grep -v '+ name + '| cut -f 1 -d " "`; \n' +\
     'echo " " >> /etc/network/interfaces ; \n' + \
     'echo "auto ' + name + '" >> /etc/network/interfaces ; \n' + \
     'echo "iface ' + name + ' inet dhcp" >> /etc/network/interfaces ; \n' + \

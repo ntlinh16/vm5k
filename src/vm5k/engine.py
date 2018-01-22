@@ -64,8 +64,8 @@ class vm5k_engine(Engine):
         self.options_parser.add_option("-e", dest="env_name",
                     help="name of the environment to be deployed",
                     type="string",
-                    default="wheezy-x64-base")
-                    #default="jessie-x64-base")
+                    #default="wheezy-x64-base")
+                    default="jessie-x64-base")
         self.options_parser.add_option("-f", dest="env_file",
                     help="path to the environment file",
                     type="string",
@@ -159,6 +159,7 @@ class vm5k_engine(Engine):
         sub.resources = 'slash_22=4+' + tmp.replace('"', '')
         sub.walltime = self.options.walltime
         sub.additional_options = '-t deploy'
+        startdate += 10
         sub.reservation_date = startdate
         (self.oar_job_id, self.frontend) = oarsub(jobs_specs)[0]
         logger.info('Startdate: %s, n_nodes: %s', format_date(startdate),
@@ -218,7 +219,7 @@ class vm5k_engine_para(vm5k_engine):
             i_slot += 1
             if i_slot == len(slots) - 1:
                 return False, False
-        logger.debug('Reserving %s nodes at %s', n_nodes, format_date(startdate))
+        logger.info('Reserving %s nodes at %s', n_nodes, format_date(startdate))
         return startdate, 1
         #return startdate, n_nodes
 
