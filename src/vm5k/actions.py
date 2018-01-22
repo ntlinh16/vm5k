@@ -71,7 +71,6 @@ def define_vms(vms_id, template=None, ip_mac=None, tap=None, state=None,
 
     :param real_file: boolean to use a real file
     """
-
     n_vm = len(vms_id)
     if template is None:
         n_cpu = [default_vm['n_cpu']] * n_vm if n_cpu is None \
@@ -83,13 +82,13 @@ def define_vms(vms_id, template=None, ip_mac=None, tap=None, state=None,
         hdd = [default_vm['hdd']] * n_vm if hdd is None \
             else [hdd] * n_vm if isinstance(hdd, int) else hdd
         backing_file = [default_vm['backing_file']] * n_vm if backing_file is None \
-            else [backing_file] * n_vm if isinstance(backing_file, str) else backing_file
+            else [backing_file] * n_vm if isinstance(backing_file, basestring) else backing_file
         real_file = [default_vm['real_file']] * n_vm if real_file is None \
             else [real_file] * n_vm if isinstance(real_file, bool) else real_file
         state = [default_vm['state']] * n_vm if state is None \
-            else [state] * n_vm if isinstance(state, str) else state
+            else [state] * n_vm if isinstance(state, basestring) else state
         host = [default_vm['host']] * n_vm if host is None \
-            else [host] * n_vm if isinstance(host, str) else host
+            else [host] * n_vm if isinstance(host, basestring) else host
 
     else:
         n_cpu = [default_vm['n_cpu']] * n_vm if 'n_cpu' not in template.attrib \
@@ -108,7 +107,6 @@ def define_vms(vms_id, template=None, ip_mac=None, tap=None, state=None,
             else [template.get('state')] * n_vm
         host = [default_vm['host']] * n_vm if 'host' not in template.attrib \
             else [template.get('host')] * n_vm
-
     ip_mac = [(None, None)] * n_vm if ip_mac is None else ip_mac
 
     tap = [tap] * n_vm if not isinstance(tap, list) else tap
@@ -287,7 +285,6 @@ def create_disks(vms, data_file_dir='/tmp/', backing_file_dir='/tmp/'):
     """ Return an action to create the disks for the VMs on the hosts"""
     logger.detail(', '.join([vm['id'] for vm in sorted(vms)]))
     hosts_cmds = {}
-
     for vm in vms:
         if vm['real_file']:
             cmd = cmd_disk_real(vm, data_file_dir, backing_file_dir)
@@ -322,34 +319,40 @@ def create_disks_all_hosts(vms, hosts):
                               Local('rm ' + vms_disks)])
 
 
-def install_vms(vms, data_file_dir='/tmp/'):
+def install_vms(vms, data_file_dir='/tmp/', cache_mode='writethrough'):
     """ Return an action to install the VM on the hosts"""
     logger.detail(', '.join([vm['id'] for vm in sorted(vms)]))
+    logger.info('Install VM with cache mode: %s' % cache_mode)
     hosts_cmds = {}
     for vm in vms:
         cmd = 'virt-install -d --import --connect qemu:///system ' + \
             '--nographics --noautoconsole --noreboot --name=' + vm['id'] + ' '\
-            '--network network=default,mac=' + vm['mac'] + ' --ram=' + \
+            '--network network=default,model=virtio,mac=' + vm['mac'] + ' --ram=' + \
             str(vm['mem']) + ' --disk path=%s' % data_file_dir + vm['id'] + \
             '.qcow2,device=disk,bus=virtio,format=qcow2,size=' + \
-            str(vm['hdd']) + ',cache=none ' + \
+            str(vm['hdd']) + ',cache=%s ' % cache_mode + \
             '--vcpus=' + str(vm['n_cpu']) + ' --cpuset=' + vm['cpuset']
         if vm['tap']:
             cmd += '--network tap,script=no,ifname=' + vm['tap']
         cmd += ' ; '
         hosts_cmds[vm['host']] = cmd if not vm['host'] in hosts_cmds \
             else hosts_cmds[vm['host']] + cmd
-
+       
+        logger.info('Install vms with cmd: %s' % cmd)
+   
     return TaktukRemote('{{hosts_cmds.values()}}', list(hosts_cmds.keys()))
 
-
-def start_vms(vms):
+def start_vms(vms, cache_cmd=None):
     """ Return an action to start the VMs on the hosts """
     hosts_cmds = {}
     for vm in vms:
         cmd = 'virsh --connect qemu:///system start ' + vm['id'] + ' ; '
         hosts_cmds[vm['host']] = cmd if not vm['host'] in hosts_cmds \
             else hosts_cmds[vm['host']] + cmd
+
+    for key, cmd in hosts_cmds.iteritems():
+        if cache_cmd:
+            hosts_cmds[key] = cmd + cache_cmd + ' ; '
 
     logger.debug(pformat(hosts_cmds))
     return TaktukRemote('{{hosts_cmds.values()}}', list(hosts_cmds.keys()))
@@ -386,7 +389,7 @@ def wait_vms_have_started(vms, restart=True):
     hosts.sort()
     # Pushing file on all hosts
     TaktukPut(hosts, [tmpfile]).run()
-    logger.debug(pformat(hosts))
+    logger.info(pformat(hosts))
     # Splitting nmap scan
     n_vm_scan = ceil(len(vms) / len(hosts)) + 1
     cmds = []
@@ -402,8 +405,8 @@ def wait_vms_have_started(vms, restart=True):
     all_up = False
     started_vms = []
     old_started = started_vms[:]
-    while (not all_up) and nmap_tries < 10:
-        sleep(15)
+    while (not all_up) and nmap_tries < 40:
+        #sleep(15)
         logger.detail('nmap_tries %s', nmap_tries)
         nmap.run()
         for p in nmap.processes:
@@ -431,6 +434,7 @@ def wait_vms_have_started(vms, restart=True):
             logger.info(str(nmap_tries) + ': ' + str(len(started_vms)) + '/' +
                         str(len(vms)))
         nmap.reset()
+        sleep(12)
 
     TaktukRemote('rm ' + tmpfile.split('/')[-1], hosts).run()
     Process('rm ' + tmpfile).run()
