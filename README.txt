@@ -24,6 +24,12 @@ In order to run the script, you need access to Grid5000 servers. The scripts can
 
 will run the VM boot time experiment with `16` VMs on the cluster named `econome` and the output is saved in folder `econome-test`.
 
+### Image used in the experiments
+We use this [image](http://enos.irisa.fr/lnguyen/boottime/images/) for setting up VMs in those experiments.
+
+### Results of the experiments
+You can find the results for analyzing VMs boot time in [here](http://enos.irisa.fr/lnguyen/boottime/vm/) and Containers boot time in [here](http://enos.irisa.fr/lnguyen/boottime/container/).
+
 ### Analyzing the results
 
 `BootTime2csv.py` is the script to convert the results of the experiments, which can be found in `postprocess/`. To run the script (use argument `-h` to see the list of all other arguments):
