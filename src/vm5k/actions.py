@@ -338,7 +338,7 @@ def install_vms(vms, data_file_dir='/tmp/', cache_mode='writethrough'):
         hosts_cmds[vm['host']] = cmd if not vm['host'] in hosts_cmds \
             else hosts_cmds[vm['host']] + cmd
        
-        logger.info('Install vms with cmd: %s' % cmd)
+        #logger.info('Install vms with cmd: %s' % cmd)
    
     return TaktukRemote('{{hosts_cmds.values()}}', list(hosts_cmds.keys()))
 
