@@ -186,7 +186,7 @@ class VMBootMeasurement(vm5k_engine_para):
             logger.error('Cannot get number of cores from [%s]' % thread_name)
         
     
-       logger.info(thread_name + ' Number of VM, coVM, ipMAC are %s %s %s',
+        logger.info(thread_name + ' Number of VM, coVM, ipMAC are %s %s %s',
                     str(comb['n_vm']), str(comb['n_co_vms']), str(len(ip_mac)))
 
         comb_ok = False
