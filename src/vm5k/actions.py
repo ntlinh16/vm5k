@@ -322,7 +322,7 @@ def create_disks_all_hosts(vms, hosts):
 def install_vms(vms, data_file_dir='/tmp/', cache_mode='writethrough'):
     """ Return an action to install the VM on the hosts"""
     logger.detail(', '.join([vm['id'] for vm in sorted(vms)]))
-    logger.info('Install VM with cache mode: %s' % cache_mode)
+    #logger.info('Install VM with cache mode: %s' % cache_mode)
     hosts_cmds = {}
     for vm in vms:
         cmd = 'virt-install -d --import --connect qemu:///system ' + \

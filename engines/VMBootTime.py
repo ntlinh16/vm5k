@@ -78,7 +78,7 @@ class VMBootMeasurement(vm5k_engine_para):
                                             default to hdd""")
         self.options_parser.add_option("--monitor",
                                        dest="monitor",
-                                       default=None,
+                                       action="store_true",
                                        help="run resource monitor with vmstat and iostat")
         self.options_parser.add_option("--ceph_backing_local",
                                        dest="ceph_backing_local",
@@ -180,21 +180,21 @@ class VMBootMeasurement(vm5k_engine_para):
 
         n_cores_host = 16
         try:
+            #logger.info('Get host cores info: %s' % get_host_attributes(host_name))
             n_cores_host = get_host_attributes(host_name)['architecture']['smt_size']
             logger.info('Number of cores on [%s] = %s' % (thread_name, n_cores_host))
         except:
             logger.error('Cannot get number of cores from [%s]' % thread_name)
-        
-    
+
         logger.info(thread_name + ' Number of VM, coVM, ipMAC are %s %s %s',
                     str(comb['n_vm']), str(comb['n_co_vms']), str(len(ip_mac)))
 
         comb_ok = False
         too_many_VMS = False
-        #Checking if there is enough core to asign to VMs or not
+        # Checking if there is enough core to asign to VMs or not
         if comb['cpu_policy'] == 'one_by_core':
-            if comb['n_vm'] + comb['n_co_vms'] * comb['n_vm'] > n_cores_host:
-              too_many_VMS = True
+            if comb['n_vm'] + comb['n_co_vms'] > n_cores_host:
+                too_many_VMS = True
 
         try:
             if not too_many_VMS:
@@ -216,7 +216,7 @@ class VMBootMeasurement(vm5k_engine_para):
 
                 if self.options.disk == 'ceph':
                     self._clean_data_disks(host)
-                    
+
                 logger.info('Create all vms on ' + thread_name)
                 vms = self.create_vms(comb, host, ip_mac)
                 logger.info('Create all vms on ' + thread_name + ': DONE')
@@ -225,7 +225,7 @@ class VMBootMeasurement(vm5k_engine_para):
                 # get vm index for outputing ordered result
                 xpvms_index = {vm['id']: str(index) for index, vm in enumerate(xpvms)}
                 covms = filter(lambda v: 'covm' in v['id'], vms)
-                logger.info(thread_name + ' # xpvms = %s| # covms = %s' % (len(xpvms), len(covms)))
+                logger.info(thread_name + ' #eVms = %s| #coVms = %s' % (len(xpvms), len(covms)))
 
                 injector = None
                 # Starting co_VMs and running workloads
@@ -240,14 +240,11 @@ class VMBootMeasurement(vm5k_engine_para):
                         exit()
 
                     logger.info('All coVMs are booted !!!')
-                    sleep(5)
+                    sleep(3)
                     if self.options.renice:
                         renice = self.renice_covms(host)
-                        logger.info('Sleep 10 seconds to wait for renice-ing')
+                        logger.info('Sleep 5 seconds to wait for renice-ing')
                         sleep(5)
-
-                    if 'network' in self.options.load_injector:
-                        self.network_ports = ['%s' % i for i in range(5000, 5000 + len(covms))]
 
                     # Inject load in covms
                     if comb['load_injector'] == 'cpu':
@@ -264,35 +261,18 @@ class VMBootMeasurement(vm5k_engine_para):
                         injector = self.pgbench(covms).start()
                     elif comb['load_injector'] == 'network':
                         logger.info('[%s] Trigger network injector' % slugify(comb))
+                        self.network_ports = ['%s' % i for i in range(5000, 5000 + len(covms))]
                         injector = self.network_stress(covms).start()
                     elif comb['load_injector'] == 'no_stress':
                         logger.info('[%s] Trigger NO STRESS injector' % slugify(comb))
-                    else:
-                        mem = []
-                        cpu = []
-                        io = []
-                        for v in covms:
-                            random.choice((mem, cpu, io)).append(v)
-                        injector = []
-                        if len(cpu):
-                            logger.info('[%s] Mixed -> cpu injector [%s]' % (slugify(comb), cpu))
-                            injector.append(self.kflops(cpu).start())
-                        if len(mem):
-                            logger.info('[%s] Mixed -> mem injector [%s]' % (slugify(comb), mem))
-                            injector.append(self.cache_bench(mem).start())
-                        if len(io):
-                            logger.info('[%s] Mixed -> io injector [%s]' % (slugify(comb), io))
-                            injector.append(self.io_stress(io).start())
 
-                    logger.info('Sleep 30 seconds to wait for stress to reach its maximum')
-                    sleep(30)
-                    logger.info('covms are up and run stress %s',
-                                comb['load_injector'])
+                    logger.info('Sleep 20 seconds to wait for stress to reach its maximum')
+                    sleep(20)
+                    logger.info('coVms are up and run stress %s', comb['load_injector'])
                 # logger.info('Get CPU utilization of all coVMs on this host')
                 # cpu_utils = self.get_cpu_utilization(host)
 
-
-                #setup limit network on HOST
+                # setup to stress network on node
                 stress = None
                 if comb.get('bandwidths', None):
                     logger.info('[%s] Trigger network injector on HOST with bandwidth %s' %
@@ -302,6 +282,7 @@ class VMBootMeasurement(vm5k_engine_para):
                     logger.info('Sleep 30 seconds to wait for stress to reach its maximum')
                     sleep(30)
 
+                # limit network and latency on host
                 if comb.get('limits', 0) > 0:
                     logger.info('[%s] Add network limitation %s on HOST' % (slugify(comb), comb['limits']))
                     self.network_limit(host, comb['limits'])
@@ -311,9 +292,8 @@ class VMBootMeasurement(vm5k_engine_para):
                     self.network_latency_limit(host, comb['latency'])
                     sleep(2)
 
-
                 # Start Resource Monitor
-                if comb.get('monitor', None):
+                if self.options.monitor:
                     logger.info('Run Resource Monitor')
                     stat_cmd = '''vmstat 1 | perl -e \'$| = 1; while (<>) { print localtime() . ": $_"; }\' > vmstat.txt &'''
                     #logger.info('Run vmstat monitor: %s' % stat_cmd)
@@ -329,20 +309,18 @@ class VMBootMeasurement(vm5k_engine_para):
                     run = TaktukRemote(stat_cmd, host).start()
                     sleep(1)
 
-
-
                 logger.info('Booting eVms %s\n%s', comb['boot_policy'],
                             "\n".join([vm['id'] + ': ' + vm['ip'] for vm in xpvms]))
                 # clear cache before boot eVms
                 cmd = '''sync && echo 3 > /proc/sys/vm/drop_caches'''
                 logger.info('Clear cache before booting eVMs')
                 run = TaktukRemote(cmd, host).run()
-                sleep(1)                
+                sleep(1)
                 # Boot XP vms
-                self.boot_vms(host, comb, xpvms)
+                self.boot_eVMs(host, comb, xpvms)
 
                 # Stop Resource Monitor
-                if comb.get('monitor', None):
+                if self.options.monitor:
                     logger.info('Stop resource monitor')
                     stat_cmd = '''pkill -f vmstat'''
                     #logger.info('stop vmstat monitor: %s' % stat_cmd)
@@ -352,20 +330,20 @@ class VMBootMeasurement(vm5k_engine_para):
                     #logger.info('stop iostat monitor: %s' % stat_cmd)
                     run = TaktukRemote(stat_cmd, host).start()
 
-                # Retrieves measurements on eVms
-                boot_duration = self.get_boot_duration(xpvms)
-                speed = None
                 if stress:
                     logger.info('Kill the iperf3 process')
                     stress.kill()
-
-                if self.options.dd:
-                    logger.info('Run dd to check disk speed')
-                    speed = self.get_disk_speed(xpvms, out_file_path='/tmp/')
-
                 if injector:
-                    logger.info('Kill the iperf3 process')
+                    logger.info('Kill the injector process')
                     injector.kill()
+
+                # Retrieves measurements on eVms
+                boot_duration = self.get_boot_duration(xpvms)
+
+                speed = None
+                if self.options.dd:
+                    logger.info('Run dd to check disk speed of eVMs')
+                    speed = self.get_disk_speed(xpvms, out_file_path='/tmp/')
 
                 if not self.save_results(host, comb, xpvms, xpvms_index, boot_duration, speed, self.hosts_speed[host]):
                     exit()
@@ -377,7 +355,7 @@ class VMBootMeasurement(vm5k_engine_para):
 
             else:
                 logger.info(thread_name + slugify(comb) +
-                            '\n The core on the node is not enough to allocate to VMs, comb_ok=%s' % comb_ok)
+                            '\n The number of cores on the node is not enough to allocate to VMs, comb_ok=%s' % comb_ok)
             comb_ok = True
 
         finally:
@@ -388,6 +366,23 @@ class VMBootMeasurement(vm5k_engine_para):
                 self.sweeper.cancel(comb)
                 logger.warning(thread_name + slugify(comb) + ' has been canceled')
             logger.info(style.step('%s Remaining'), len(self.sweeper.get_remaining()))
+
+    def no_stress(self, vms):
+        """Prepare a benchmark command with stress tool"""
+        logger.info('Running NO Stress with the following vms:\n%s' % vms)
+        return True
+
+    def kflops(self, vms):
+        """Prepare a benchmark command with kflops"""
+        #logger.info("Running cpu kflop with %s" % vms)
+        logger.info("Running cpu kflop on coVMs")
+        vms_ip = [vm['ip'] for vm in vms]
+        vms_out = [vm['ip'] + '_' + vm['cpuset'] for vm in vms]
+
+        stress = TaktukRemote('./benchs/kflops/kflops > /root/kflops_{{vms_out}}.out',
+                              vms_ip)
+
+        return stress
 
     def cache_bench(self, vms):
         """Prepare a benchmark command with cachebench"""
@@ -436,8 +431,8 @@ class VMBootMeasurement(vm5k_engine_para):
 
     def network_limit(self, host, limit):
         """Limit the network in host"""
-        logger.info('Sleep 20s then limit network to %sMbps on the following host: %s' % (limit, host))
-        sleep(20)
+        logger.info('Sleep 10s then limit network to %sMbps on the following host: %s' % (limit, host))
+        sleep(10)
 
         cmd = '''
         tc qdisc add dev ifb0 root handle 1: htb default 30 &&
@@ -480,11 +475,6 @@ class VMBootMeasurement(vm5k_engine_para):
             logger.info('Clean data directory')
             TaktukRemote('rm -rf /tmp/data_%s/*' % index, host).run()
 
-    def no_stress(self, vms):
-        """Prepare a benchmark command with stress tool"""
-        logger.info('Running NO Stress with the following vms:\n%s' % vms)
-        return True
-
     def renice_covms(self, host):
         """Renice covms to set new priority"""
         logger.info('Renice coVMs on the following host: %s' % host)
@@ -506,7 +496,7 @@ class VMBootMeasurement(vm5k_engine_para):
             boot_duration[p.host.address]['link_up'] = p.stdout.strip()[0:-1]
 
         cmd = """p=`grep "Server listening on .* port 22" /var/log/auth.log | tail -n 1 | awk '{print $5}'`; pid=${p:5:${#p}-7};clk_tck=$(getconf CLK_TCK);start=`cat /proc/$pid/stat |  awk '{print $22}'`; echo $start $clk_tck | awk '{ print $1/$2 }'"""
-        #print 'Boottime Command: %s' % cmd
+        # print 'Boottime Command: %s' % cmd
         # retry Taktuk for k-times
         retries = self.options.number_of_retries
         while retries > 0:
@@ -710,7 +700,7 @@ class VMBootMeasurement(vm5k_engine_para):
             logger.info('Sleep %s seconds after created disks and installed %s vms' %
                         (15 + (4 * len(vms_ids)), len(vms_ids)))
             sleep(15 + (4 * len(vms_ids)))
-            
+
         elif self.options.disk == 'opendedup':
             logger.info('Creating disks with opendedup')
             create = create_disks(vms,
@@ -738,8 +728,9 @@ class VMBootMeasurement(vm5k_engine_para):
                          slugify(comb))
             exit()
 
-        #set cache mode for VMs
+        # set cache mode for VMs
         cache_mode = comb.get('cache_mode', 'writethrough')
+        logger.info('Install VMs with cache mode: %s' % cache_mode)
 
         logger.info('Installing VMS')
         if self.options.disk == 'ceph':
@@ -753,7 +744,7 @@ class VMBootMeasurement(vm5k_engine_para):
             exit()
         return vms
 
-    def boot_vms(self, host, comb, xpvms):
+    def boot_eVMs(self, host, comb, xpvms):
         if comb['boot_policy'] == 'all_at_once':
             start_vms(xpvms).run()
             booted = wait_vms_have_started(xpvms)
@@ -864,17 +855,6 @@ class VMBootMeasurement(vm5k_engine_para):
                          umount.stderr.strip())
             exit()
 
-    def kflops(self, vms):
-        """Prepare a benchmark command with kflops"""
-        logger.info("Running cpu kflop with %s" % vms)
-        vms_ip = [vm['ip'] for vm in vms]
-        vms_out = [vm['ip'] + '_' + vm['cpuset'] for vm in vms]
-
-        stress = TaktukRemote('./benchs/kflops/kflops > /root/kflops_{{vms_out}}.out',
-                              vms_ip)
-
-        return stress
-
     def _setup_iperf3_host(self, setup):
         logger.info('Setup iperf3 for the HOST')
         cmd = '''echo "deb http://ftp.debian.org/debian sid main" >> /etc/apt/sources.list && ''' + \
@@ -893,10 +873,66 @@ class VMBootMeasurement(vm5k_engine_para):
         mount = setup.fact.get_remote(cmd, setup.hosts).run()
         setup._actions_hosts(mount)
 
+    def _setup_opendedup(self, setup):
+        logger.info('Install OpenDedup on host')
+        setup._other_packages(other_packages='fuse')
+        setup.fact.get_remote("wget http://www.opendedup.org/downloads/sdfs-latest.deb", self.hosts).run()
+        setup.fact.get_remote("dpkg -i sdfs-latest.deb", self.hosts).run()
+
+        logger.info('Change the maximum of openfile on host')
+        setup.fact.get_remote('echo "* hard nofile 65535" >> /etc/security/limits.conf', self.hosts).run()
+        setup.fact.get_remote('echo "* soft nofile 65535" >> /etc/security/limits.conf', self.hosts).run()
+
+        logger.info('Make dir for OpenDedup volume')
+        setup.fact.get_remote('mkdir /tmp/dedup', self.hosts).run()
+
+        total_machines = 16
+        logger.info('Creating OpenDedup volume of %s GB' % (4 * total_machines))
+        setup.fact.get_remote('mkfs.sdfs --volume-name=pool_dedup --volume-capacity=%sGB' %
+                              (4 * total_machines), self.hosts).run()
+
+        logger.info('Mounting -> umount OpenDedup volume')
+
+        setup.fact.get_remote(
+            "mount.sdfs pool_dedup /tmp/dedup && sleep 10 && umount /tmp/dedup && echo -ne '\n'", self.hosts).run()
+
+        setup.fact.get_remote(
+            "mount.sdfs pool_dedup /tmp/dedup && sleep 10 && echo -ne '\n'", self.hosts).run()
+
+        logger.info('Mounting OpenDedup volume ... DONE')
+        sleep(50)
+
     def _setup_ceph(self, setup):
-        """Installation of packages"""
-        # logger.info('Wait 2 minute for setting from CEPH master')
-        # sleep(120)
+        # Install CEPH
+        logger.info('Install ceph + packages in a different way')
+        cmd = '''export DEBIAN_FRONTEND=noninteractive && ''' + \
+              '''apt-get update -y --force-yes && ''' + \
+              '''apt-get install -y --force-yes ceph'''
+        p = setup.fact.get_remote(cmd, self.hosts).run()
+        setup._actions_hosts(p)
+        logger.info('Install ceph + packages in a different way ... DONE')
+
+        # Setup CEPH client
+        logger.info('Get setting from CEPH master')
+        host = self.hosts[0]
+        cmd = '''ceph-deploy install %s''' % (host)
+        p = setup.fact.get_remote(cmd, [self.options.ceph_master]).run()
+        print p
+        cmd = '''ceph-deploy admin %s''' % (host)
+        p = setup.fact.get_remote(cmd, [self.options.ceph_master]).run()
+        print p
+        logger.info('Get setting from CEPH master ... DONE')
+
+        logger.info('Create volume for backing file in CEPH master')
+        cmd = 'rbd create backing_file --size 30720 --pool rbd'
+        p = setup.fact.get_remote(cmd, [self.options.ceph_master]).run()
+
+        for index in range(1, 17):
+            logger.info('Create volume for data %s in CEPH master' % index)
+            cmd = 'rbd create data_%s --size 30720 --pool data' % index
+            p = setup.fact.get_remote(cmd, [self.options.ceph_master]).run()
+
+        logger.info('Create volume in CEPH master ... DONE')
 
         logger.info('Setup ceph')
 
@@ -963,88 +999,28 @@ class VMBootMeasurement(vm5k_engine_para):
                                    fileget_tool=SCP)
         logger.info('Deploy hosts')
         setup.hosts_deployment()
-        
-        if self.options.disk == 'ssd':
-            self._setup_ssd(setup)
 
         setup.packages_management(
             other_packages='iftop sysstat time build-essential parallel gawk nload git', launch_disk_copy=False)
 
         if self.options.disk == 'ceph':
-            #Install ceph
-            logger.info('Install ceph + packages in a different way')
-            cmd = '''export DEBIAN_FRONTEND=noninteractive && ''' + \
-                  '''apt-get update -y --force-yes && ''' + \
-                  '''apt-get install -y --force-yes ceph'''
-            p = setup.fact.get_remote(cmd, self.hosts).run()
-            setup._actions_hosts(p)
-            logger.info('Install ceph + packages in a different way ... DONE')
-
-            #Setup CEPH client        
-            logger.info('Get setting from CEPH master')
-            host = self.hosts[0]
-            cmd = '''ceph-deploy install %s''' % (host)
-            p = setup.fact.get_remote(cmd, [self.options.ceph_master]).run()
-            print p
-            cmd = '''ceph-deploy admin %s''' % (host)
-            p = setup.fact.get_remote(cmd, [self.options.ceph_master]).run()
-            print p
-            logger.info('Get setting from CEPH master ... DONE')
-
-            logger.info('Create volume for backing file in CEPH master')
-            cmd = 'rbd create backing_file --size 30720 --pool rbd'
-            p = setup.fact.get_remote(cmd, [self.options.ceph_master]).run()
-
-            for index in range(1, 17):
-                logger.info('Create volume for data %s in CEPH master' % index)
-                cmd = 'rbd create data_%s --size 30720 --pool data' % index
-                p = setup.fact.get_remote(cmd, [self.options.ceph_master]).run()
-
-            logger.info('Create volume in CEPH master ... DONE')
-
             self._setup_ceph(setup)
 
             backing_file_dir = '/tmp/backing_file'
             data_file_dir = '/tmp/data'
-            
+            if self.options.ceph_backing_local:
+                backing_file_dir = '/tmp'
         elif self.options.disk == 'opendedup':
-            logger.info('Install OpenDedup on host')
-            setup._other_packages(other_packages='fuse')
-            setup.fact.get_remote("wget http://www.opendedup.org/downloads/sdfs-latest.deb", self.hosts).run()
-            setup.fact.get_remote("dpkg -i sdfs-latest.deb", self.hosts).run()
-
-            logger.info('Change the maximum of openfile on host')
-            setup.fact.get_remote('echo "* hard nofile 65535" >> /etc/security/limits.conf', self.hosts).run()
-            setup.fact.get_remote('echo "* soft nofile 65535" >> /etc/security/limits.conf', self.hosts).run()
-
-            logger.info('Make dir for OpenDedup volume')
-            setup.fact.get_remote('mkdir /tmp/dedup', self.hosts).run()
-
-            total_machines = 16
-            logger.info('Creating OpenDedup volume of %s GB' % (4 * total_machines))
-            setup.fact.get_remote('mkfs.sdfs --volume-name=pool_dedup --volume-capacity=%sGB' %
-                                  (4 * total_machines), self.hosts).run()
-
-            logger.info('Mounting -> umount OpenDedup volume')
-
-            setup.fact.get_remote(
-                "mount.sdfs pool_dedup /tmp/dedup && sleep 10 && umount /tmp/dedup && echo -ne '\n'", self.hosts).run()
-
-            setup.fact.get_remote(
-                "mount.sdfs pool_dedup /tmp/dedup && sleep 10 && echo -ne '\n'", self.hosts).run()
+            self._setup_opendedup(setup)
 
             backing_file_dir = '/tmp/dedup'
             data_file_dir = '/tmp/dedup'
-
-            logger.info('Mounting OpenDedup volume ... DONE')
-            sleep(50)
         else:
             backing_file_dir = '/tmp'
             data_file_dir = '/tmp'
 
-        if self.options.ceph_backing_local:
-            backing_file_dir = '/tmp'
-            data_file_dir = '/tmp/data'
+            if self.options.disk == 'ssd':
+                self._setup_ssd(setup)
 
         setup._start_disk_copy(disks, backing_file_dir=backing_file_dir)
 
@@ -1052,12 +1028,11 @@ class VMBootMeasurement(vm5k_engine_para):
         setup.configure_libvirt()
         logger.info('Create backing file')
 
-        if self.options.disk == 'ssd':
-            self._setup_ssd(setup)
         setup._create_backing_file(disks=disks, backing_file_dir=backing_file_dir)
         if self.options.bandwidth:
             self._setup_iperf3_host(setup)
 
+        # Install vmtouch
         logger.info('Install vmtouch')
         cmd = '''git clone https://github.com/hoytech/vmtouch.git && ''' + \
             '''cd vmtouch && ''' + \
@@ -1067,10 +1042,12 @@ class VMBootMeasurement(vm5k_engine_para):
         setup._actions_hosts(p)
         logger.info('Install vmtouch ... DONE')
 
-        #Copy the network limit script
+        # Copy the vmtouch script from frontend
         logger.info('Copy the vmtouch script file')
-        TaktukPut(setup.hosts, ['/home/lnguyen/boottime/dependency_boottime/vmtouch_command_ceph.sh'], remote_location='/tmp/').run()
-        TaktukPut(setup.hosts, ['/home/lnguyen/boottime/dependency_boottime/vmtouch_command.sh'], remote_location='/tmp/').run()
+        TaktukPut(setup.hosts, ['/home/lnguyen/boottime/dependency_boottime/vmtouch_command_ceph.sh'],
+                  remote_location='/tmp/').run()
+        TaktukPut(setup.hosts, ['/home/lnguyen/boottime/dependency_boottime/vmtouch_command.sh'],
+                  remote_location='/tmp/').run()
 
         if self.options.ksm:
             logger.info('Enabling KSM')
@@ -1104,7 +1081,6 @@ class VMBootMeasurement(vm5k_engine_para):
             if is_error:
                 logger.info('ifb interface error')
                 raise Exception('ifb error in commands')
-
 
     def run(self):
         """The main experimental workflow, as described in
