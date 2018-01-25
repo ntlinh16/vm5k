@@ -19,10 +19,10 @@ to print the list of parameters needed.
 In order to run the script, you need access to Grid5000 servers. The scripts can be modified to be used in other platforms as well. After `git clone` the repository and choose the experiment to perform, you can run the experiment with your custom scenario. For example:
 
 ```
-./VMBootTime.py --vm 16 econome -c econome-test --monitor 
+./VMBootTime.py --vm 16 econome -c econome-test —monitor
 ```
 
-will run the VM boot time experiment with `16` VMs on the cluster named `econome` and the output is saved in folder `econome-test`. The output will be the boot time, the resource usage information.
+will run the VM boot time experiment with `16` VMs on the cluster named `econome` and the output is saved in folder `econome-test`. The output will be the boot time of VMs and the resource usage.
 
 ### Analyzing the results
 
