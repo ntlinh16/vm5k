@@ -266,7 +266,7 @@ class vm5k_deployment():
                 deployed_hosts[i] = get_kavlan_host_name(host, self.kavlan)
             for i, host in enumerate(undeployed_hosts):
                 undeployed_hosts[i] = get_kavlan_host_name(host, self.kavlan)
-        logger.info('Deployed %s hosts \n%s', len(deployed_hosts),
+        #logger.info('Deployed %s hosts \n%s', len(deployed_hosts),
                     hosts_list(deployed_hosts))
         cr = '\n' if len(undeployed_hosts) > 0 else ''
         logger.info('Failed %s hosts %s%s', len(undeployed_hosts), cr,

@@ -236,7 +236,7 @@ def list_vm(hosts, not_running=False):
 
 def destroy_vms(hosts, undefine=False):
     """Destroy all the VM on the hosts"""
-    logger.info('Destroying vms from %s' % hosts)
+    logger.info('Destroying vms on  %s' % hosts)
     # retry destroying
     all_destroyed = False
     attempt = 0
@@ -389,7 +389,7 @@ def wait_vms_have_started(vms, restart=True):
     hosts.sort()
     # Pushing file on all hosts
     TaktukPut(hosts, [tmpfile]).run()
-    logger.info(pformat(hosts))
+    #logger.info(pformat(hosts))
     # Splitting nmap scan
     n_vm_scan = ceil(len(vms) / len(hosts)) + 1
     cmds = []
@@ -439,7 +439,7 @@ def wait_vms_have_started(vms, restart=True):
     TaktukRemote('rm ' + tmpfile.split('/')[-1], hosts).run()
     Process('rm ' + tmpfile).run()
     if all_up:
-        logger.info('All VM have been started')
+        #logger.info('All VM have been started')
         return True
     else:
         logger.error('All VM have not been started')
